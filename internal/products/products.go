@@ -39,6 +39,8 @@ func SeedProducts() {
 			CategoryID:    1,
 			StockQuantity: 1,
 			IsAnimal:      true, // Обязательно для паспорта Ернура!
+			IsHorse:       true,
+			MedicalRecord: "Vaccinated: 2025-01-01; Checkup: Healthy",
 		}
 		nextID = id + 1
 	}

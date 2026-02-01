@@ -17,6 +17,11 @@ type Product struct {
 	CategoryID    int     `json:"category_id"`
 	StockQuantity int     `json:"stock_quantity"`
 	IsAnimal      bool
+
+	// Fields for Digital Passport
+	OwnerID       int    `json:"owner_id"`
+	IsHorse       bool   `json:"is_horse"`
+	MedicalRecord string `json:"medical_record"`
 }
 
 type Order struct {
