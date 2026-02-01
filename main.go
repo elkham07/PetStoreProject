@@ -2,6 +2,7 @@ package main
 
 import (
 	"PetStoreProject/internal/auth"
+	"PetStoreProject/internal/orders"
 	"PetStoreProject/internal/products"
 	"fmt"
 	"net/http"
@@ -59,6 +60,18 @@ func main() {
 			return
 		}
 		fmt.Fprintf(w, "Product with ID 1 deleted successfully")
+	})
+
+	http.HandleFunc("/order/create", func(w http.ResponseWriter, r *http.Request) {
+
+		newOrder := orders.CreateOrder(1)
+		fmt.Fprintf(w, "Order #%d created at %s", newOrder.ID, newOrder.CreatedAt.Format("15:04:05"))
+	})
+
+	http.HandleFunc("/orders", func(w http.ResponseWriter, r *http.Request) {
+
+		userOrders := orders.GetOrdersByUser(1)
+		fmt.Fprintf(w, "User #1 has %d orders in system", len(userOrders))
 	})
 
 	fmt.Println("Server is running on http://localhost:5090")
