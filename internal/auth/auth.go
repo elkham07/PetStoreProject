@@ -31,3 +31,17 @@ func Register(name, email, password, role string) (models.User, error) {
 	users[email] = newUser
 	return newUser, nil
 }
+
+// GetVeterinarians returns a list of users who are veterinarians
+func GetVeterinarians() []models.User {
+	mu.Lock()
+	defer mu.Unlock()
+
+	var vets []models.User
+	for _, u := range users {
+		if u.Role == "Veterinarian" {
+			vets = append(vets, u)
+		}
+	}
+	return vets
+}

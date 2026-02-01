@@ -30,3 +30,19 @@ type Order struct {
 	Status    string    `json:"status"`
 	CreatedAt time.Time `json:"created_at"`
 }
+
+type Message struct {
+	ID        int       `json:"id"`
+	SenderID  int       `json:"sender_id"`
+	Content   string    `json:"content"`
+	Timestamp time.Time `json:"timestamp"`
+}
+
+type Consultation struct {
+	ID        int       `json:"id"`
+	UserID    int       `json:"user_id"`
+	VetID     int       `json:"vet_id"`
+	ProductID int       `json:"product_id"`
+	Messages  []Message `json:"messages"`
+	Active    bool      `json:"active"`
+}

@@ -2,10 +2,13 @@ package main
 
 import (
 	"PetStoreProject/internal/auth"
+	"PetStoreProject/internal/consultation"
 	"PetStoreProject/internal/orders"
 	"PetStoreProject/internal/products"
+	"encoding/json"
 	"fmt"
 	"net/http"
+	"strconv"
 )
 
 func main() {
@@ -73,6 +76,64 @@ func main() {
 
 		userOrders := orders.GetOrdersByUser(1)
 		fmt.Fprintf(w, "User #1 has %d orders in system", len(userOrders))
+	})
+
+	http.HandleFunc("/passport/view", func(w http.ResponseWriter, r *http.Request) {
+		idStr := r.URL.Query().Get("id")
+		if idStr == "" {
+			http.Error(w, "Missing id parameter", http.StatusBadRequest)
+			return
+		}
+
+		id, err := strconv.Atoi(idStr)
+		if err != nil {
+			http.Error(w, "Invalid id parameter", http.StatusBadRequest)
+			return
+		}
+
+		passport, err := products.GetPassportByID(id)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(passport)
+	})
+
+	// --- Consultation Routes ---
+
+	http.HandleFunc("/consultation/start", func(w http.ResponseWriter, r *http.Request) {
+		userID, _ := strconv.Atoi(r.URL.Query().Get("user_id"))
+		vetID, _ := strconv.Atoi(r.URL.Query().Get("vet_id"))
+		productID, _ := strconv.Atoi(r.URL.Query().Get("product_id"))
+
+		c := consultation.StartConsultation(userID, vetID, productID)
+		fmt.Fprintf(w, "Consultation #%d started", c.ID)
+	})
+
+	http.HandleFunc("/consultation/send", func(w http.ResponseWriter, r *http.Request) {
+		cID, _ := strconv.Atoi(r.URL.Query().Get("consultation_id"))
+		senderID, _ := strconv.Atoi(r.URL.Query().Get("sender_id"))
+		content := r.URL.Query().Get("content")
+
+		err := consultation.SendMessage(cID, senderID, content)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusBadRequest)
+			return
+		}
+		fmt.Fprint(w, "Message sent")
+	})
+
+	http.HandleFunc("/consultation/history", func(w http.ResponseWriter, r *http.Request) {
+		cID, _ := strconv.Atoi(r.URL.Query().Get("consultation_id"))
+		c, err := consultation.GetConsultation(cID)
+		if err != nil {
+			http.Error(w, err.Error(), http.StatusNotFound)
+			return
+		}
+		w.Header().Set("Content-Type", "application/json")
+		json.NewEncoder(w).Encode(c)
 	})
 
 	fmt.Println("Server is running on http://localhost:5090")
