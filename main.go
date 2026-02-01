@@ -1,142 +1,92 @@
 package main
 
 import (
-	"PetStoreProject/internal/auth"
-	"PetStoreProject/internal/consultation"
-	"PetStoreProject/internal/orders"
-	"PetStoreProject/internal/products"
 	"encoding/json"
-	"fmt"
+	"log"
 	"net/http"
-	"strconv"
+	"os"
+
+	"PetStoreProject/internal/auth"
+	"PetStoreProject/internal/database"
+	"PetStoreProject/internal/market"
+	"PetStoreProject/internal/passport"
+	"PetStoreProject/internal/telehealth"
 )
 
 func main() {
-	products.SeedProducts()
+	mongoURI := os.Getenv("MONGO_URI")
+	if mongoURI == "" {
+		mongoURI = "mongodb://localhost:27017/zhailau"
+	}
 
-	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
+	if err := database.ConnectDB(mongoURI); err != nil {
+		log.Fatal(err)
+	}
 
-		user, err := auth.Register("Elkham", "elkham@example.com", "securePass", "Customer")
+	fs := http.FileServer(http.Dir("./public"))
+	http.Handle("/", fs)
 
-		if err != nil {
-			fmt.Fprintf(w, "Error: %s", err)
-			return
-		}
-
-		fmt.Fprintf(w, "Success! User %s created with role %s", user.Name, user.Role)
-	})
-
-	// Внутри func main() после регистрации:
-	http.HandleFunc("/products", func(w http.ResponseWriter, r *http.Request) {
+	http.HandleFunc("/api/auth/register", func(w http.ResponseWriter, r *http.Request) {
 		if r.Method == http.MethodPost {
-			// Имитация добавления товара
-			p := products.AddProduct("Horse Feed", 25.50, 1, 100)
-			fmt.Fprintf(w, "Added: %s (Price: %.2f)", p.Name, p.Price)
+			auth.Register(w, r)
 		} else {
-			// Показать все
-			all := products.GetAllProducts()
-			fmt.Fprintf(w, "Total products: %d", len(all))
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
+		}
+	})
+	http.HandleFunc("/api/auth/login", func(w http.ResponseWriter, r *http.Request) {
+		if r.Method == http.MethodPost {
+			auth.Login(w, r)
+		} else {
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
 	})
 
-	// Маршрут для получения одного товара (активирует GetProductByID)
-	http.HandleFunc("/product", func(w http.ResponseWriter, r *http.Request) {
-		// Для теста запрашиваем ID = 1
-		p, err := products.GetProductByID(1)
-		if err != nil {
-			fmt.Fprintf(w, "Error: %s", err)
-			return
+	http.HandleFunc("/api/animals", auth.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			passport.GetAnimals(w, r)
+		case http.MethodPost:
+			passport.CreateAnimal(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-		fmt.Fprintf(w, "Found Product: %s, Price: %.2f", p.Name, p.Price)
-	})
+	}))
 
-	http.HandleFunc("/product/update", func(w http.ResponseWriter, r *http.Request) {
-
-		products.UpdateProduct(1, "Updated Horse", 500.0, 5)
-		fmt.Fprint(w, "Product updated")
-	})
-
-	http.HandleFunc("/product/delete", func(w http.ResponseWriter, r *http.Request) {
-		// Допустим, мы удаляем товар с ID 1
-		err := products.DeleteProduct(1)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
+	http.HandleFunc("/api/orders", auth.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			market.GetOrders(w, r)
+		case http.MethodPost:
+			market.CreateOrder(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
-		fmt.Fprintf(w, "Product with ID 1 deleted successfully")
-	})
+	}))
 
-	http.HandleFunc("/order/create", func(w http.ResponseWriter, r *http.Request) {
-
-		newOrder := orders.CreateOrder(1)
-		fmt.Fprintf(w, "Order #%d created at %s", newOrder.ID, newOrder.CreatedAt.Format("15:04:05"))
-	})
-
-	http.HandleFunc("/orders", func(w http.ResponseWriter, r *http.Request) {
-
-		userOrders := orders.GetOrdersByUser(1)
-		fmt.Fprintf(w, "User #1 has %d orders in system", len(userOrders))
-	})
-
-	http.HandleFunc("/passport/view", func(w http.ResponseWriter, r *http.Request) {
-		idStr := r.URL.Query().Get("id")
-		if idStr == "" {
-			http.Error(w, "Missing id parameter", http.StatusBadRequest)
-			return
+	http.HandleFunc("/api/products", auth.AuthMiddleware(func(w http.ResponseWriter, r *http.Request) {
+		switch r.Method {
+		case http.MethodGet:
+			market.GetProducts(w, r)
+		case http.MethodPost:
+			market.CreateProduct(w, r)
+		default:
+			http.Error(w, "Method not allowed", http.StatusMethodNotAllowed)
 		}
+	}))
 
-		id, err := strconv.Atoi(idStr)
-		if err != nil {
-			http.Error(w, "Invalid id parameter", http.StatusBadRequest)
-			return
-		}
+	http.HandleFunc("/api/telehealth/ws", telehealth.HandleWebSocket)
 
-		passport, err := products.GetPassportByID(id)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(passport)
+	http.HandleFunc("/health", func(w http.ResponseWriter, r *http.Request) {
+		json.NewEncoder(w).Encode(map[string]string{"status": "ok"})
 	})
 
-	// --- Consultation Routes ---
+	port := os.Getenv("PORT")
+	if port == "" {
+		port = "8080"
+	}
 
-	http.HandleFunc("/consultation/start", func(w http.ResponseWriter, r *http.Request) {
-		userID, _ := strconv.Atoi(r.URL.Query().Get("user_id"))
-		vetID, _ := strconv.Atoi(r.URL.Query().Get("vet_id"))
-		productID, _ := strconv.Atoi(r.URL.Query().Get("product_id"))
-
-		c := consultation.StartConsultation(userID, vetID, productID)
-		fmt.Fprintf(w, "Consultation #%d started", c.ID)
-	})
-
-	http.HandleFunc("/consultation/send", func(w http.ResponseWriter, r *http.Request) {
-		cID, _ := strconv.Atoi(r.URL.Query().Get("consultation_id"))
-		senderID, _ := strconv.Atoi(r.URL.Query().Get("sender_id"))
-		content := r.URL.Query().Get("content")
-
-		err := consultation.SendMessage(cID, senderID, content)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusBadRequest)
-			return
-		}
-		fmt.Fprint(w, "Message sent")
-	})
-
-	http.HandleFunc("/consultation/history", func(w http.ResponseWriter, r *http.Request) {
-		cID, _ := strconv.Atoi(r.URL.Query().Get("consultation_id"))
-		c, err := consultation.GetConsultation(cID)
-		if err != nil {
-			http.Error(w, err.Error(), http.StatusNotFound)
-			return
-		}
-		w.Header().Set("Content-Type", "application/json")
-		json.NewEncoder(w).Encode(c)
-	})
-
-	fmt.Println("Server is running on http://localhost:5090")
-
-	http.ListenAndServe(":5090", nil)
+	log.Printf("Server starting on port %s...", port)
+	if err := http.ListenAndServe(":"+port, nil); err != nil {
+		log.Fatal(err)
+	}
 }

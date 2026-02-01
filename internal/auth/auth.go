@@ -1,47 +1,134 @@
 package auth
 
 import (
+	"context"
+	"encoding/json"
+	"net/http"
+	"time"
+
+	"PetStoreProject/internal/database"
 	"PetStoreProject/internal/models"
-	"errors"
-	"sync"
+
+	"github.com/golang-jwt/jwt/v5"
+	"go.mongodb.org/mongo-driver/bson"
+	"go.mongodb.org/mongo-driver/bson/primitive"
+	"golang.org/x/crypto/bcrypt"
 )
 
-var (
-	users = make(map[string]models.User)
-	mu    sync.Mutex
-)
+var SecretKey = []byte("jajajajwt")
 
-// Register
-func Register(name, email, password, role string) (models.User, error) {
-	mu.Lock()
-	defer mu.Unlock()
-
-	if _, exists := users[email]; exists {
-		return models.User{}, errors.New("user already exists")
-	}
-
-	newUser := models.User{
-		ID:       len(users) + 1,
-		Name:     name,
-		Email:    email,
-		Password: password,
-		Role:     role,
-	}
-
-	users[email] = newUser
-	return newUser, nil
+type Credentials struct {
+	Email    string `json:"email"`
+	Password string `json:"password"`
 }
 
-// GetVeterinarians returns a list of users who are veterinarians
-func GetVeterinarians() []models.User {
-	mu.Lock()
-	defer mu.Unlock()
-
-	var vets []models.User
-	for _, u := range users {
-		if u.Role == "Veterinarian" {
-			vets = append(vets, u)
-		}
+func Register(w http.ResponseWriter, r *http.Request) {
+	var user models.User
+	if err := json.NewDecoder(r.Body).Decode(&user); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
 	}
-	return vets
+
+	hashedPassword, err := bcrypt.GenerateFromPassword([]byte(user.Password), bcrypt.DefaultCost)
+	if err != nil {
+		http.Error(w, "Could not hash password", http.StatusInternalServerError)
+		return
+	}
+	user.Password = string(hashedPassword)
+	user.ID = primitive.NewObjectID()
+
+	collection := database.GetCollection("users")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	count, err := collection.CountDocuments(ctx, bson.M{"email": user.Email})
+	if err != nil {
+		http.Error(w, err.Error(), http.StatusInternalServerError)
+		return
+	}
+	if count > 0 {
+		http.Error(w, "Email already taken", http.StatusConflict)
+		return
+	}
+
+	_, err = collection.InsertOne(ctx, user)
+	if err != nil {
+		http.Error(w, "Failed to create user", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{"message": "User created successfully"})
+}
+
+func Login(w http.ResponseWriter, r *http.Request) {
+	var creds Credentials
+	if err := json.NewDecoder(r.Body).Decode(&creds); err != nil {
+		http.Error(w, err.Error(), http.StatusBadRequest)
+		return
+	}
+
+	collection := database.GetCollection("users")
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+
+	var user models.User
+	err := collection.FindOne(ctx, bson.M{"email": creds.Email}).Decode(&user)
+	if err != nil {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	if err := bcrypt.CompareHashAndPassword([]byte(user.Password), []byte(creds.Password)); err != nil {
+		http.Error(w, "Invalid email or password", http.StatusUnauthorized)
+		return
+	}
+
+	expirationTime := time.Now().Add(24 * time.Hour)
+	claims := &jwt.RegisteredClaims{
+		Subject:   user.ID.Hex(),
+		ExpiresAt: jwt.NewNumericDate(expirationTime),
+	}
+
+	token := jwt.NewWithClaims(jwt.SigningMethodHS256, claims)
+	tokenString, err := token.SignedString(SecretKey)
+	if err != nil {
+		http.Error(w, "Could not generate token", http.StatusInternalServerError)
+		return
+	}
+
+	w.Header().Set("Content-Type", "application/json")
+	json.NewEncoder(w).Encode(map[string]string{
+		"token":   tokenString,
+		"user_id": user.ID.Hex(),
+		"role":    user.Role,
+		"email":   user.Email,
+		"name":    user.Name,
+	})
+}
+
+func AuthMiddleware(next http.HandlerFunc) http.HandlerFunc {
+	return func(w http.ResponseWriter, r *http.Request) {
+		tokenString := r.Header.Get("Authorization")
+		if tokenString == "" {
+			http.Error(w, "Missing Authorization header", http.StatusUnauthorized)
+			return
+		}
+
+		if len(tokenString) > 7 && tokenString[:7] == "Bearer " {
+			tokenString = tokenString[7:]
+		}
+
+		claims := &jwt.RegisteredClaims{}
+		token, err := jwt.ParseWithClaims(tokenString, claims, func(token *jwt.Token) (interface{}, error) {
+			return SecretKey, nil
+		})
+
+		if err != nil || !token.Valid {
+			http.Error(w, "Invalid token", http.StatusUnauthorized)
+			return
+		}
+
+		next(w, r)
+	}
 }
