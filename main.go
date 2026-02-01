@@ -9,7 +9,8 @@ import (
 )
 
 func main() {
-	// Маршрут для регистрации
+	products.SeedProducts()
+
 	http.HandleFunc("/register", func(w http.ResponseWriter, r *http.Request) {
 
 		user, err := auth.Register("Elkham", "elkham@example.com", "securePass", "Customer")

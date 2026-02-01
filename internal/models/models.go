@@ -16,6 +16,7 @@ type Product struct {
 	Price         float64 `json:"price"`
 	CategoryID    int     `json:"category_id"`
 	StockQuantity int     `json:"stock_quantity"`
+	IsAnimal      bool
 }
 
 type Order struct {
